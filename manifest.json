@@ -1,0 +1,10 @@
+{
+	"id": "obsidian-gantt-chart",
+	"name": "Gantt Chart",
+	"version": "1.0.0",
+	"minAppVersion": "0.15.0",
+	"description": "Interactive Gantt chart view built from frontmatter date properties. Drag to resize and move tasks.",
+	"author": "Nick Puchko",
+	"authorUrl": "https://sumrak.name",
+	"isDesktopOnly": false
+}

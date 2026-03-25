@@ -1,0 +1,599 @@
+/* ── Gantt Chart Plugin ─────────────────────────────────────────────────────── */
+
+.gantt-container {
+	height: 100%;
+	overflow: hidden;
+	font-family: var(--font-interface);
+	font-size: 13px;
+	color: var(--text-normal);
+	background: var(--background-primary);
+}
+
+.gantt-container * {
+	box-sizing: border-box;
+}
+
+/* ── Empty State ───────────────────────────────────────────────────────────── */
+
+.gantt-empty {
+	display: flex;
+	flex-direction: column;
+	align-items: center;
+	justify-content: center;
+	height: 100%;
+	color: var(--text-muted);
+	text-align: center;
+	padding: 40px;
+}
+
+.gantt-empty h3 {
+	margin-bottom: 8px;
+	color: var(--text-normal);
+}
+
+.gantt-empty p {
+	max-width: 400px;
+	line-height: 1.5;
+}
+
+/* ── Wrapper (sidebar + timeline) ──────────────────────────────────────────── */
+
+.gantt-wrapper {
+	display: flex;
+	height: 100%;
+	overflow: hidden;
+}
+
+/* ── Sidebar ───────────────────────────────────────────────────────────────── */
+
+.gantt-sidebar {
+	width: 220px;
+	min-width: 220px;
+	border-right: 1px solid var(--background-modifier-border);
+	display: flex;
+	flex-direction: column;
+	background: var(--background-primary);
+	z-index: 2;
+}
+
+.gantt-sidebar-header {
+	height: 52px;
+	min-height: 52px;
+	display: flex;
+	align-items: flex-end;
+	padding: 0 12px 6px 12px;
+	font-weight: 600;
+	color: var(--text-muted);
+	font-size: 12px;
+	text-transform: uppercase;
+	letter-spacing: 0.5px;
+	border-bottom: 1px solid var(--background-modifier-border);
+	background: var(--background-secondary);
+}
+
+.gantt-sidebar-body {
+	flex: 1;
+	overflow: hidden;
+}
+
+.gantt-sidebar-row {
+	height: 40px;
+	display: flex;
+	align-items: center;
+	padding: 0 12px;
+	border-bottom: 1px solid var(--background-modifier-border-hover);
+	overflow: hidden;
+}
+
+.gantt-task-link {
+	color: var(--text-normal);
+	text-decoration: none;
+	white-space: nowrap;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	cursor: pointer;
+	transition: color 0.15s ease;
+}
+
+.gantt-task-link:hover {
+	color: var(--text-accent);
+	text-decoration: underline;
+}
+
+/* ── Timeline ──────────────────────────────────────────────────────────────── */
+
+.gantt-timeline {
+	flex: 1;
+	overflow: auto;
+	position: relative;
+}
+
+.gantt-timeline::-webkit-scrollbar {
+	width: 8px;
+	height: 8px;
+}
+
+.gantt-timeline::-webkit-scrollbar-thumb {
+	background: var(--background-modifier-border);
+	border-radius: 4px;
+}
+
+.gantt-timeline::-webkit-scrollbar-track {
+	background: transparent;
+}
+
+/* ── Timeline Header (months + days) ───────────────────────────────────────── */
+
+.gantt-timeline-header {
+	position: sticky;
+	top: 0;
+	z-index: 1;
+	height: 52px;
+	background: var(--background-secondary);
+	border-bottom: 1px solid var(--background-modifier-border);
+}
+
+.gantt-month-row {
+	display: flex;
+	height: 26px;
+}
+
+.gantt-month-cell {
+	display: flex;
+	align-items: center;
+	padding: 0 8px;
+	font-weight: 600;
+	font-size: 12px;
+	color: var(--text-normal);
+	border-right: 1px solid var(--background-modifier-border);
+	white-space: nowrap;
+	overflow: hidden;
+	text-overflow: ellipsis;
+}
+
+.gantt-day-row {
+	display: flex;
+	height: 26px;
+}
+
+.gantt-day-cell {
+	width: 32px;
+	min-width: 32px;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	font-size: 11px;
+	color: var(--text-muted);
+	border-right: 1px solid var(--background-modifier-border-hover);
+}
+
+.gantt-day-cell.gantt-weekend {
+	background: var(--background-secondary-alt, hsla(0, 0%, 50%, 0.06));
+	color: var(--text-faint);
+}
+
+.gantt-day-cell.gantt-today {
+	background: hsla(210, 80%, 55%, 0.15);
+	font-weight: 700;
+	color: var(--text-accent);
+}
+
+/* ── Timeline Body ─────────────────────────────────────────────────────────── */
+
+.gantt-timeline-body {
+	position: relative;
+}
+
+/* ── Grid ──────────────────────────────────────────────────────────────────── */
+
+.gantt-grid {
+	position: absolute;
+	top: 0;
+	left: 0;
+	width: 100%;
+	height: 100%;
+	pointer-events: none;
+}
+
+.gantt-grid-col {
+	position: absolute;
+	top: 0;
+	border-right: 1px solid var(--background-modifier-border-hover);
+}
+
+.gantt-grid-col.gantt-weekend {
+	background: hsla(0, 0%, 50%, 0.04);
+}
+
+.gantt-grid-col.gantt-today {
+	background: hsla(210, 80%, 55%, 0.08);
+	border-right: 2px solid var(--text-accent);
+}
+
+.gantt-grid-col-minor {
+	border-right-color: transparent;
+}
+
+.gantt-grid-col-major {
+	border-right: 1px solid var(--background-modifier-border);
+}
+
+/* Week/month cells in header */
+.gantt-week-cell,
+.gantt-month-label-cell {
+	justify-content: flex-start;
+	padding-left: 4px;
+	font-weight: 500;
+	border-right: 1px solid var(--background-modifier-border);
+}
+
+.gantt-row-line {
+	position: absolute;
+	left: 0;
+	height: 1px;
+	background: var(--background-modifier-border-hover);
+}
+
+/* ── Task Bars ─────────────────────────────────────────────────────────────── */
+
+.gantt-bar {
+	position: absolute;
+	border-radius: 5px;
+	border: 1px solid;
+	cursor: grab;
+	display: flex;
+	align-items: center;
+	overflow: hidden;
+	transition: box-shadow 0.15s ease, opacity 0.15s ease;
+	z-index: 1;
+	user-select: none;
+}
+
+.gantt-bar:hover {
+	box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
+	z-index: 2;
+}
+
+.gantt-bar.gantt-bar-selected {
+	outline: 2px solid var(--interactive-accent);
+	outline-offset: 1px;
+	z-index: 3;
+}
+
+.gantt-bar.gantt-bar-dragging {
+	cursor: grabbing;
+	opacity: 0.85;
+	box-shadow: 0 4px 16px rgba(0, 0, 0, 0.3);
+	z-index: 10;
+}
+
+.gantt-bar-label {
+	padding: 0 8px;
+	white-space: nowrap;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	font-size: 12px;
+	font-weight: 500;
+	color: #fff;
+	text-shadow: 0 1px 2px rgba(0, 0, 0, 0.3);
+	pointer-events: none;
+	flex: 1;
+}
+
+/* ── Drag Handles ──────────────────────────────────────────────────────────── */
+
+.gantt-bar-handle {
+	position: absolute;
+	top: 0;
+	width: 8px;
+	height: 100%;
+	cursor: col-resize;
+	z-index: 3;
+	opacity: 0;
+	transition: opacity 0.15s ease, background 0.15s ease;
+}
+
+.gantt-bar:hover .gantt-bar-handle {
+	opacity: 1;
+}
+
+.gantt-bar-handle-left {
+	left: 0;
+	border-radius: 5px 0 0 5px;
+	background: rgba(255, 255, 255, 0.2);
+}
+
+.gantt-bar-handle-right {
+	right: 0;
+	border-radius: 0 5px 5px 0;
+	background: rgba(255, 255, 255, 0.2);
+}
+
+.gantt-bar-handle:hover {
+	background: rgba(255, 255, 255, 0.35);
+}
+
+/* ── Task Edit Modal ───────────────────────────────────────────────────────── */
+
+.gantt-modal {
+	padding: 8px 0;
+}
+
+.gantt-modal-title {
+	margin: 0 0 16px 0;
+	font-size: 18px;
+	font-weight: 600;
+}
+
+.gantt-modal-date-input {
+	font-family: var(--font-interface);
+	cursor: pointer;
+}
+
+.gantt-modal-buttons {
+	display: flex;
+	justify-content: flex-end;
+	gap: 8px;
+	margin-top: 20px;
+}
+
+.gantt-modal-buttons button {
+	padding: 6px 20px;
+	border-radius: 6px;
+	font-size: 14px;
+	cursor: pointer;
+}
+
+/* ── Sidebar: project row ──────────────────────────────────────────────────── */
+
+.gantt-sidebar-row-project {
+	font-weight: 500;
+}
+
+.gantt-chevron {
+	flex-shrink: 0;
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	width: 20px;
+	height: 20px;
+	cursor: pointer;
+	color: var(--text-muted);
+	border-radius: 4px;
+	transition: color 0.15s ease, background 0.15s ease;
+	margin-right: 2px;
+}
+
+.gantt-chevron:hover {
+	color: var(--text-normal);
+	background: var(--background-modifier-hover);
+}
+
+.gantt-project-name {
+	flex: 1;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+	cursor: pointer;
+	color: var(--text-normal);
+	transition: color 0.15s ease;
+}
+
+.gantt-project-name:hover {
+	color: var(--text-accent);
+}
+
+.gantt-file-link {
+	flex-shrink: 0;
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	width: 22px;
+	height: 22px;
+	color: var(--text-faint);
+	cursor: pointer;
+	border-radius: 4px;
+	transition: color 0.15s ease, background 0.15s ease;
+	margin-left: 4px;
+	opacity: 0;
+}
+
+.gantt-sidebar-row-project:hover .gantt-file-link {
+	opacity: 1;
+}
+
+.gantt-file-link:hover {
+	color: var(--text-accent);
+	background: var(--background-modifier-hover);
+}
+
+/* ── Sidebar: sub-task row (indented) ──────────────────────────────────────── */
+
+.gantt-sidebar-row-task {
+	padding-left: 34px;
+	background: var(--background-secondary);
+	cursor: default;
+}
+
+.gantt-sidebar-row-task:hover {
+	background: var(--background-modifier-hover);
+}
+
+.gantt-task-text {
+	flex: 1;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+	color: var(--text-muted);
+	font-size: 12px;
+}
+
+/* ── Undated task row ──────────────────────────────────────────────────────── */
+
+.gantt-sidebar-row-undated {
+	opacity: 0.7;
+}
+
+.gantt-sidebar-row-undated .gantt-task-text {
+	font-style: italic;
+	color: var(--text-faint);
+}
+
+/* ── Add task row ──────────────────────────────────────────────────────────── */
+
+.gantt-sidebar-row-add {
+	padding-left: 34px;
+	background: var(--background-secondary);
+}
+
+.gantt-add-task-label {
+	color: var(--text-faint);
+	font-size: 12px;
+	cursor: pointer;
+	transition: color 0.15s ease;
+}
+
+.gantt-add-task-label:hover {
+	color: var(--text-accent);
+}
+
+.gantt-add-task-input {
+	width: 100%;
+	border: none;
+	border-bottom: 1px solid var(--interactive-accent);
+	background: transparent;
+	color: var(--text-normal);
+	font-size: 12px;
+	padding: 2px 0;
+	outline: none;
+	font-family: var(--font-interface);
+}
+
+.gantt-no-dates-badge {
+	flex-shrink: 0;
+	font-size: 10px;
+	padding: 1px 6px;
+	border-radius: 4px;
+	background: var(--background-modifier-border);
+	color: var(--text-faint);
+	margin-left: 6px;
+	white-space: nowrap;
+}
+
+/* ── Sub-task bar style ────────────────────────────────────────────────────── */
+
+.gantt-bar-subtask {
+	opacity: 0.8;
+	border-style: dashed;
+}
+
+/* ── Undated task clickable zone ───────────────────────────────────────────── */
+
+.gantt-undated-zone {
+	position: absolute;
+	left: 0;
+	cursor: crosshair;
+	z-index: 1;
+	background: transparent;
+	transition: background 0.15s ease;
+}
+
+.gantt-undated-zone:hover {
+	background: hsla(210, 80%, 55%, 0.05);
+}
+
+/* ── Context Menu ──────────────────────────────────────────────────────────── */
+
+.gantt-context-menu {
+	background: var(--background-primary);
+	border: 1px solid var(--background-modifier-border);
+	border-radius: 6px;
+	box-shadow: 0 4px 16px rgba(0, 0, 0, 0.2);
+	padding: 4px 0;
+	min-width: 140px;
+}
+
+.gantt-context-menu-item {
+	padding: 6px 14px;
+	font-size: 13px;
+	cursor: pointer;
+	color: var(--text-normal);
+	transition: background 0.1s ease;
+}
+
+.gantt-context-menu-item:hover {
+	background: var(--background-modifier-hover);
+}
+
+.gantt-context-menu-item-danger {
+	color: var(--text-error, #e55);
+}
+
+.gantt-context-menu-item-danger:hover {
+	background: hsla(0, 70%, 50%, 0.1);
+}
+
+/* ── Tabs ──────────────────────────────────────────────────────────────────── */
+
+.gantt-tab-bar {
+	display: flex;
+	gap: 0;
+	border-bottom: 1px solid var(--background-modifier-border);
+	background: var(--background-secondary);
+	padding: 0 8px;
+	flex-shrink: 0;
+}
+
+.gantt-tab {
+	padding: 8px 16px;
+	font-size: 13px;
+	font-weight: 500;
+	color: var(--text-muted);
+	background: none;
+	border: none;
+	border-bottom: 2px solid transparent;
+	cursor: pointer;
+	transition: color 0.15s ease, border-color 0.15s ease;
+	margin-bottom: -1px;
+}
+
+.gantt-tab:hover {
+	color: var(--text-normal);
+}
+
+.gantt-tab-active {
+	color: var(--text-accent);
+	border-bottom-color: var(--interactive-accent);
+}
+
+/* ── Flat task row (tasks-only tab) ────────────────────────────────────────── */
+
+.gantt-sidebar-row-task-flat {
+	padding-left: 12px;
+}
+
+.gantt-task-source {
+	flex-shrink: 0;
+	font-size: 10px;
+	color: var(--text-faint);
+	margin-left: 6px;
+	padding: 1px 5px;
+	border-radius: 3px;
+	background: var(--background-modifier-border);
+	white-space: nowrap;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	max-width: 80px;
+}
+
+/* ── Container layout ──────────────────────────────────────────────────────── */
+
+.gantt-container {
+	display: flex;
+	flex-direction: column;
+}
+
+.gantt-wrapper {
+	flex: 1;
+	min-height: 0;
+}
