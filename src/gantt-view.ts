@@ -24,6 +24,7 @@ interface DisplayRow {
 	title: string;
 	colorIndex: number;
 	hasDates: boolean;
+	completed: boolean;
 }
 
 export class GanttChartView extends ItemView {
@@ -38,6 +39,7 @@ export class GanttChartView extends ItemView {
 	private dayWidth = DAY_WIDTH_DEFAULT;
 	private activeTab: 'projects' | 'tasks' = 'projects';
 	private allFileTasks: FileTask[] = [];
+	private hideCompleted = false;
 
 	// Selection state for Delete key
 	private selectedRow: DisplayRow | null = null;
@@ -54,6 +56,7 @@ export class GanttChartView extends ItemView {
 	getIcon(): string { return 'bar-chart-horizontal'; }
 
 	async onOpen(): Promise<void> {
+		this.hideCompleted = this.plugin.settings.hideCompletedTasks;
 		this.boundKeyDown = (e: KeyboardEvent) => this.onKeyDown(e);
 		document.addEventListener('keydown', this.boundKeyDown);
 		await this.refresh();
@@ -243,12 +246,12 @@ export class GanttChartView extends ItemView {
 		for (let i = 0; i < lines.length; i++) {
 			const line = lines[i]!;
 			if (!/^\s*-\s*\[.\]/.test(line)) continue;
+			const completed = /^\s*-\s*\[x\]/i.test(line);
 			const { start, due } = parseTaskLine(line);
 			let s = start, e = due;
 
 			if (!s && !e) {
-				// Task with no dates at all
-				undated.push({ file, lineNumber: i, text: extractTaskTitle(line), startDate: null, endDate: null, colorIndex: ci % TASK_COLORS.length });
+				undated.push({ file, lineNumber: i, text: extractTaskTitle(line), startDate: null, endDate: null, colorIndex: ci % TASK_COLORS.length, completed });
 				ci++;
 				continue;
 			}
@@ -257,7 +260,7 @@ export class GanttChartView extends ItemView {
 			if (s && !e) e = s;
 			if (!s || !e) continue;
 			if (s.getTime() > e.getTime()) { const t = s; s = e; e = t; }
-			dated.push({ file, lineNumber: i, text: extractTaskTitle(line), startDate: s, endDate: e, colorIndex: ci % TASK_COLORS.length });
+			dated.push({ file, lineNumber: i, text: extractTaskTitle(line), startDate: s, endDate: e, colorIndex: ci % TASK_COLORS.length, completed });
 			ci++;
 		}
 
@@ -265,7 +268,6 @@ export class GanttChartView extends ItemView {
 			const d = a.startDate!.getTime() - b.startDate!.getTime();
 			return d !== 0 ? d : a.text.localeCompare(b.text);
 		});
-		// Undated tasks go after dated ones
 		this.fileTasksMap.set(file.path, [...dated, ...undated]);
 	}
 
@@ -276,24 +278,24 @@ export class GanttChartView extends ItemView {
 				type: 'project', project: task,
 				startDate: task.startDate, endDate: task.endDate,
 				title: task.title, colorIndex: task.colorIndex,
-				hasDates: true,
+				hasDates: true, completed: false,
 			});
 			if (this.expanded.has(task.file.path)) {
 				const fts = this.fileTasksMap.get(task.file.path) ?? [];
 				for (const ft of fts) {
+					if (this.hideCompleted && ft.completed) continue;
 					const hasDates = ft.startDate !== null && ft.endDate !== null;
 					rows.push({
 						type: 'task', fileTask: ft,
 						startDate: ft.startDate, endDate: ft.endDate,
 						title: ft.text, colorIndex: ft.colorIndex,
-						hasDates,
+						hasDates, completed: ft.completed,
 					});
 				}
-				// Add task placeholder row
 				rows.push({
 					type: 'add-task', projectFile: task.file,
 					startDate: null, endDate: null,
-					title: '', colorIndex: 0, hasDates: false,
+					title: '', colorIndex: 0, hasDates: false, completed: false,
 				});
 			}
 		}
@@ -311,17 +313,18 @@ export class GanttChartView extends ItemView {
 			for (let i = 0; i < lines.length; i++) {
 				const line = lines[i]!;
 				if (!/^\s*-\s*\[.\]/.test(line)) continue;
+				const completed = /^\s*-\s*\[x\]/i.test(line);
 				const { start, due } = parseTaskLine(line);
 				let s = start, e = due;
 				if (!s && !e) {
-					all.push({ file, lineNumber: i, text: extractTaskTitle(line), startDate: null, endDate: null, colorIndex: ci % TASK_COLORS.length });
+					all.push({ file, lineNumber: i, text: extractTaskTitle(line), startDate: null, endDate: null, colorIndex: ci % TASK_COLORS.length, completed });
 					ci++; continue;
 				}
 				if (!s && e) s = e;
 				if (s && !e) e = s;
 				if (!s || !e) continue;
 				if (s.getTime() > e.getTime()) { const t = s; s = e; e = t; }
-				all.push({ file, lineNumber: i, text: extractTaskTitle(line), startDate: s, endDate: e, colorIndex: ci % TASK_COLORS.length });
+				all.push({ file, lineNumber: i, text: extractTaskTitle(line), startDate: s, endDate: e, colorIndex: ci % TASK_COLORS.length, completed });
 				ci++;
 			}
 		}
@@ -335,12 +338,13 @@ export class GanttChartView extends ItemView {
 	private buildTasksOnlyRows(): void {
 		const rows: DisplayRow[] = [];
 		for (const ft of this.allFileTasks) {
+			if (this.hideCompleted && ft.completed) continue;
 			const hasDates = ft.startDate !== null && ft.endDate !== null;
 			rows.push({
 				type: 'task', fileTask: ft,
 				startDate: ft.startDate, endDate: ft.endDate,
 				title: ft.text, colorIndex: ft.colorIndex,
-				hasDates,
+				hasDates, completed: ft.completed,
 			});
 		}
 		this.displayRows = rows;
@@ -390,6 +394,18 @@ export class GanttChartView extends ItemView {
 			this.refresh();
 		});
 
+		// Hide completed toggle
+		const toggleWrap = tabBar.createDiv({ cls: 'gantt-tab-spacer' });
+		const hideLabel = toggleWrap.createEl('label', { cls: 'gantt-hide-completed-label' });
+		const checkbox = hideLabel.createEl('input', { type: 'checkbox' });
+		checkbox.type = 'checkbox';
+		checkbox.checked = this.hideCompleted;
+		hideLabel.appendText(' Hide completed');
+		checkbox.addEventListener('change', () => {
+			this.hideCompleted = checkbox.checked;
+			this.refresh();
+		});
+
 		if (this.displayRows.length === 0) {
 			const empty = container.createDiv({ cls: 'gantt-empty' });
 			const msg = this.activeTab === 'projects'
@@ -404,10 +420,35 @@ export class GanttChartView extends ItemView {
 		const rowCount = this.displayRows.length;
 
 		// ── Sidebar ──────────────────────────────────────────────
+		const sidebarW = this.plugin.settings.sidebarWidth;
 		const sidebar = wrapper.createDiv({ cls: 'gantt-sidebar' });
+		sidebar.style.width = `${sidebarW}px`;
+		sidebar.style.minWidth = `${sidebarW}px`;
 		const sidebarHeaderText = this.activeTab === 'projects' ? 'Project' : 'Task';
 		sidebar.createDiv({ cls: 'gantt-sidebar-header', text: sidebarHeaderText });
 		const sidebarBody = sidebar.createDiv({ cls: 'gantt-sidebar-body' });
+
+		// Resize handle
+		const resizeHandle = wrapper.createDiv({ cls: 'gantt-sidebar-resize' });
+		resizeHandle.addEventListener('mousedown', (e: MouseEvent) => {
+			e.preventDefault();
+			const startX = e.clientX;
+			const startW = this.plugin.settings.sidebarWidth;
+			const onMove = (ev: MouseEvent) => {
+				const newW = Math.max(120, Math.min(500, startW + ev.clientX - startX));
+				sidebar.style.width = `${newW}px`;
+				sidebar.style.minWidth = `${newW}px`;
+			};
+			const onUp = async (ev: MouseEvent) => {
+				document.removeEventListener('mousemove', onMove);
+				document.removeEventListener('mouseup', onUp);
+				const finalW = Math.max(120, Math.min(500, startW + ev.clientX - startX));
+				this.plugin.settings.sidebarWidth = finalW;
+				await this.plugin.saveSettings();
+			};
+			document.addEventListener('mousemove', onMove);
+			document.addEventListener('mouseup', onUp);
+		});
 
 		for (const row of this.displayRows) {
 			if (row.type === 'project' && row.project) {
@@ -491,12 +532,19 @@ export class GanttChartView extends ItemView {
 			} else if (row.fileTask) {
 				const isNested = this.activeTab === 'projects';
 				const baseCls = isNested ? 'gantt-sidebar-row gantt-sidebar-row-task' : 'gantt-sidebar-row gantt-sidebar-row-task-flat';
-				const cls = row.hasDates ? baseCls : baseCls + ' gantt-sidebar-row-undated';
+				let cls = row.hasDates ? baseCls : baseCls + ' gantt-sidebar-row-undated';
+				if (row.completed) cls += ' gantt-sidebar-row-completed';
 				const sidebarRow = sidebarBody.createDiv({ cls });
 				sidebarRow.createEl('span', { cls: 'gantt-task-text', text: row.title });
 				if (!isNested) {
-					// Show source file name in tasks-only mode
-					sidebarRow.createEl('span', { cls: 'gantt-task-source', text: row.fileTask.file.basename });
+					// Show source file name in tasks-only mode (clickable)
+					const source = sidebarRow.createEl('a', { cls: 'gantt-task-source', text: row.fileTask.file.basename });
+					source.setAttribute('title', 'Open: ' + row.fileTask.file.path);
+					const sourceFile = row.fileTask.file;
+					source.addEventListener('click', (ev) => {
+						ev.preventDefault(); ev.stopPropagation();
+						this.app.workspace.getLeaf('tab').openFile(sourceFile);
+					});
 				}
 				if (!row.hasDates) {
 					sidebarRow.createEl('span', { cls: 'gantt-no-dates-badge', text: 'no dates' });
@@ -551,6 +599,7 @@ export class GanttChartView extends ItemView {
 				const ft = row.fileTask;
 				const bar = this.createBar(body, i, row.startDate, row.endDate, row.title, row.colorIndex);
 				bar.addClass('gantt-bar-subtask');
+				if (row.completed) bar.addClass('gantt-bar-completed');
 				const currentRow = row;
 				bar.addEventListener('click', (e) => { e.stopPropagation(); this.selectBar(currentRow, bar); });
 				bar.addEventListener('contextmenu', (e) => this.showContextMenu(e, currentRow));

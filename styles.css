@@ -47,13 +47,24 @@
 /* ── Sidebar ───────────────────────────────────────────────────────────────── */
 
 .gantt-sidebar {
-	width: 220px;
-	min-width: 220px;
-	border-right: 1px solid var(--background-modifier-border);
+	border-right: none;
 	display: flex;
 	flex-direction: column;
 	background: var(--background-primary);
 	z-index: 2;
+	flex-shrink: 0;
+}
+
+.gantt-sidebar-resize {
+	width: 5px;
+	cursor: col-resize;
+	background: var(--background-modifier-border);
+	flex-shrink: 0;
+	transition: background 0.15s ease;
+}
+
+.gantt-sidebar-resize:hover {
+	background: var(--interactive-accent);
 }
 
 .gantt-sidebar-header {
@@ -487,6 +498,21 @@
 	border-style: dashed;
 }
 
+/* ── Completed task styles ─────────────────────────────────────────────────── */
+
+.gantt-sidebar-row-completed .gantt-task-text {
+	text-decoration: line-through;
+	color: var(--text-faint);
+}
+
+.gantt-bar-completed {
+	opacity: 0.45;
+}
+
+.gantt-bar-completed .gantt-bar-label {
+	text-decoration: line-through;
+}
+
 /* ── Undated task clickable zone ───────────────────────────────────────────── */
 
 .gantt-undated-zone {
@@ -566,6 +592,32 @@
 	border-bottom-color: var(--interactive-accent);
 }
 
+.gantt-tab-spacer {
+	margin-left: auto;
+	display: flex;
+	align-items: center;
+}
+
+.gantt-hide-completed-label {
+	display: flex;
+	align-items: center;
+	gap: 5px;
+	font-size: 12px;
+	color: var(--text-muted);
+	cursor: pointer;
+	white-space: nowrap;
+	user-select: none;
+}
+
+.gantt-hide-completed-label:hover {
+	color: var(--text-normal);
+}
+
+.gantt-hide-completed-label input[type="checkbox"] {
+	margin: 0;
+	cursor: pointer;
+}
+
 /* ── Flat task row (tasks-only tab) ────────────────────────────────────────── */
 
 .gantt-sidebar-row-task-flat {
@@ -584,6 +636,14 @@
 	overflow: hidden;
 	text-overflow: ellipsis;
 	max-width: 80px;
+	cursor: pointer;
+	text-decoration: none;
+	transition: color 0.15s ease, background 0.15s ease;
+}
+
+.gantt-task-source:hover {
+	color: var(--text-accent);
+	background: var(--background-modifier-hover);
 }
 
 /* ── Container layout ──────────────────────────────────────────────────────── */

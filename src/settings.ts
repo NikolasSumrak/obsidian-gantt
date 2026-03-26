@@ -33,6 +33,18 @@ export class GanttSettingTab extends PluginSettingTab {
 				await this.plugin.saveSettings();
 				this.plugin.refreshViews();
 			});
+
+		new Setting(containerEl)
+			.setName('Hide completed tasks')
+			.setDesc('Hide tasks marked as done ([x]) by default when opening the Gantt chart.')
+			.addToggle((toggle) => {
+				toggle.setValue(this.plugin.settings.hideCompletedTasks);
+				toggle.onChange(async (value) => {
+					this.plugin.settings.hideCompletedTasks = value;
+					await this.plugin.saveSettings();
+					this.plugin.refreshViews();
+				});
+			});
 	}
 
 	private addPropertySetting(containerEl: HTMLElement, name: string, desc: string,
