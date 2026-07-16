@@ -2,6 +2,8 @@
 <project version="4">
   <component name="ProjectModuleManager">
     <modules>
+      <module fileurl="file://$PROJECT_DIR$/../../events_uploader_Csv/.idea/events_uploader_Csv.iml" filepath="$PROJECT_DIR$/../../events_uploader_Csv/.idea/events_uploader_Csv.iml" />
+      <module fileurl="file://$PROJECT_DIR$/../misc/.idea/misc.iml" filepath="$PROJECT_DIR$/../misc/.idea/misc.iml" />
       <module fileurl="file://$PROJECT_DIR$/.idea/obsidian-gantt.iml" filepath="$PROJECT_DIR$/.idea/obsidian-gantt.iml" />
     </modules>
   </component>

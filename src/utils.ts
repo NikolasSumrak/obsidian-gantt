@@ -52,6 +52,34 @@ export function addDays(d: Date, n: number): Date {
 	return result;
 }
 
+export function addMonths(d: Date, n: number): Date {
+	const result = new Date(d.getTime());
+	result.setMonth(result.getMonth() + n);
+	return result;
+}
+
+// Whether a frontmatter value marks a file as a Gantt project.
+// Accepts true / "true" / "yes" / "1" (case-insensitive) or the number 1.
+export function isMarkerTruthy(value: unknown): boolean {
+	if (value === true) return true;
+	if (typeof value === 'number') return value === 1;
+	if (typeof value === 'string') {
+		const v = value.trim().toLowerCase();
+		return v === 'true' || v === 'yes' || v === '1';
+	}
+	return false;
+}
+
+// Whether a file path sits inside one of the excluded folders.
+export function isPathExcluded(path: string, excludedFolders: string[]): boolean {
+	for (const raw of excludedFolders) {
+		const folder = raw.replace(/^\/+|\/+$/g, '').trim();
+		if (!folder) continue;
+		if (path === folder || path.startsWith(folder + '/')) return true;
+	}
+	return false;
+}
+
 export function daysBetween(a: Date, b: Date): number {
 	return Math.round((b.getTime() - a.getTime()) / DAY_MS);
 }

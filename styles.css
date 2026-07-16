@@ -498,6 +498,19 @@
 	border-style: dashed;
 }
 
+/* ── Aggregate (rolled-up) project bar ─────────────────────────────────────── */
+
+.gantt-bar-aggregate {
+	cursor: pointer;
+	border-width: 2px;
+	box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.25);
+}
+
+/* Rolled-up bars are read-only — no resize handles. */
+.gantt-bar-aggregate .gantt-bar-handle {
+	display: none;
+}
+
 /* ── Completed task styles ─────────────────────────────────────────────────── */
 
 .gantt-sidebar-row-completed .gantt-task-text {
@@ -596,6 +609,25 @@
 	margin-left: auto;
 	display: flex;
 	align-items: center;
+	gap: 12px;
+}
+
+.gantt-today-btn {
+	padding: 4px 12px;
+	font-size: 12px;
+	font-weight: 500;
+	color: var(--text-normal);
+	background: var(--interactive-normal);
+	border: 1px solid var(--background-modifier-border);
+	border-radius: 5px;
+	cursor: pointer;
+	white-space: nowrap;
+	transition: background 0.15s ease, color 0.15s ease;
+}
+
+.gantt-today-btn:hover {
+	background: var(--interactive-accent);
+	color: var(--text-on-accent);
 }
 
 .gantt-hide-completed-label {

@@ -7,9 +7,9 @@ import {
 } from './constants';
 import { GanttTask, FileTask } from './types';
 import {
-	parseDate, formatDate, addDays, daysBetween, stripTime,
+	parseDate, formatDate, addDays, addMonths, daysBetween, stripTime,
 	isWeekend, isToday, extractTaskTitle, parseTaskLine, updateFileTaskDates,
-	clearFileTaskDates,
+	clearFileTaskDates, isMarkerTruthy, isPathExcluded,
 } from './utils';
 import { ProjectEditModal, FileTaskEditModal } from './modals';
 
@@ -18,13 +18,31 @@ interface DisplayRow {
 	type: 'project' | 'task' | 'add-task';
 	project?: GanttTask;
 	fileTask?: FileTask;
-	projectFile?: TFile; // for add-task rows
+	projectFile?: TFile; // for add-task and aggregate-project rows
+	aggregate?: boolean; // project whose dates are derived from its tasks (no own frontmatter dates)
+	segments?: DateInterval[]; // for aggregate projects: task intervals to draw (with gaps)
 	startDate: Date | null;
 	endDate: Date | null;
 	title: string;
 	colorIndex: number;
 	hasDates: boolean;
 	completed: boolean;
+}
+
+interface DateInterval {
+	start: Date;
+	end: Date;
+}
+
+// A marked project (file with the marker property) plus its rolled-up date range.
+// `segments` are the merged task intervals — the project bar is drawn only over
+// these, leaving gaps where the project has no tasks.
+interface MarkedProject {
+	file: TFile;
+	tasks: FileTask[];
+	start: Date | null;
+	end: Date | null;
+	segments: DateInterval[];
 }
 
 export class GanttChartView extends ItemView {
@@ -37,9 +55,12 @@ export class GanttChartView extends ItemView {
 	private timelineStart: Date = new Date();
 	private totalDays = 0;
 	private dayWidth = DAY_WIDTH_DEFAULT;
-	private activeTab: 'projects' | 'tasks' = 'projects';
+	private activeTab: 'projects' | 'tasks' | 'byproject' = 'byproject';
 	private allFileTasks: FileTask[] = [];
+	private markedProjects: MarkedProject[] = [];
 	private hideCompleted = false;
+	// When true, the next render scrolls the timeline so today is centered.
+	private centerOnToday = true;
 
 	// Selection state for Delete key
 	private selectedRow: DisplayRow | null = null;
@@ -57,6 +78,7 @@ export class GanttChartView extends ItemView {
 
 	async onOpen(): Promise<void> {
 		this.hideCompleted = this.plugin.settings.hideCompletedTasks;
+		this.centerOnToday = true;
 		this.boundKeyDown = (e: KeyboardEvent) => this.onKeyDown(e);
 		document.addEventListener('keydown', this.boundKeyDown);
 		await this.refresh();
@@ -152,9 +174,17 @@ export class GanttChartView extends ItemView {
 				this.fileTasksMap.delete(path);
 			}
 		}
+		await this.rebuildRows();
+	}
+
+	// Rebuild display rows for the active tab, recompute the time range and render.
+	private async rebuildRows(): Promise<void> {
 		if (this.activeTab === 'tasks') {
 			await this.collectAllFileTasks();
 			this.buildTasksOnlyRows();
+		} else if (this.activeTab === 'byproject') {
+			await this.collectMarkedProjects();
+			this.buildByProjectRows();
 		} else {
 			await this.buildDisplayRows();
 		}
@@ -171,9 +201,7 @@ export class GanttChartView extends ItemView {
 			this.expanded.add(path);
 			await this.loadFileTasks(file);
 		}
-		await this.buildDisplayRows();
-		this.computeTimeRange();
-		this.render();
+		await this.rebuildRows();
 	}
 
 	private async addTaskToFile(file: TFile, taskName: string): Promise<void> {
@@ -202,9 +230,7 @@ export class GanttChartView extends ItemView {
 		await this.app.vault.modify(file, lines.join('\n'));
 		// Reload tasks for this project
 		await this.loadFileTasks(file);
-		await this.buildDisplayRows();
-		this.computeTimeRange();
-		this.render();
+		await this.rebuildRows();
 	}
 
 	// ── Data ─────────────────────────────────────────────────────────
@@ -213,10 +239,12 @@ export class GanttChartView extends ItemView {
 		const files = this.app.vault.getMarkdownFiles();
 		const startProp = this.plugin.settings.startDateProperty;
 		const endProp = this.plugin.settings.endDateProperty;
+		const excluded = this.plugin.settings.excludedFolders;
 		const tasks: GanttTask[] = [];
 		let ci = 0;
 
 		for (const file of files) {
+			if (isPathExcluded(file.path, excluded)) continue;
 			const fm = this.app.metadataCache.getFileCache(file)?.frontmatter;
 			if (!fm) continue;
 			let s = parseDate(fm[startProp]), e = parseDate(fm[endProp]);
@@ -304,10 +332,12 @@ export class GanttChartView extends ItemView {
 
 	private async collectAllFileTasks(): Promise<void> {
 		const files = this.app.vault.getMarkdownFiles();
+		const excluded = this.plugin.settings.excludedFolders;
 		const all: FileTask[] = [];
 		let ci = 0;
 
 		for (const file of files) {
+			if (isPathExcluded(file.path, excluded)) continue;
 			const content = await this.app.vault.cachedRead(file);
 			const lines = content.split('\n');
 			for (let i = 0; i < lines.length; i++) {
@@ -350,19 +380,111 @@ export class GanttChartView extends ItemView {
 		this.displayRows = rows;
 	}
 
-	private computeTimeRange(): void {
-		const dated = this.displayRows.filter(r => r.hasDates && r.startDate && r.endDate);
-		if (dated.length === 0) {
-			const today = stripTime(new Date());
-			this.timelineStart = addDays(today, -7);
-			this.totalDays = 30;
-			return;
+	// ── "By Project" mode ────────────────────────────────────────────
+	// Files carrying the marker property become projects. A project has no
+	// dates of its own — its bar spans the earliest start to the latest end
+	// of the dated tasks it contains.
+	private async collectMarkedProjects(): Promise<void> {
+		const files = this.app.vault.getMarkdownFiles();
+		const markerProp = this.plugin.settings.projectMarkerProperty;
+		const excluded = this.plugin.settings.excludedFolders;
+		const result: MarkedProject[] = [];
+
+		for (const file of files) {
+			if (isPathExcluded(file.path, excluded)) continue;
+			const fm = this.app.metadataCache.getFileCache(file)?.frontmatter;
+			if (!fm || !isMarkerTruthy(fm[markerProp])) continue;
+
+			await this.loadFileTasks(file);
+			const tasks = this.fileTasksMap.get(file.path) ?? [];
+
+			const segments = this.mergeTaskIntervals(tasks);
+			const start = segments.length ? segments[0]!.start : null;
+			const end = segments.length ? segments[segments.length - 1]!.end : null;
+			result.push({ file, tasks, start, end, segments });
 		}
-		let earliest = dated[0]!.startDate!, latest = dated[0]!.endDate!;
+
+		result.sort((a, b) => {
+			const at = a.start ? a.start.getTime() : Infinity;
+			const bt = b.start ? b.start.getTime() : Infinity;
+			return at !== bt ? at - bt : a.file.basename.localeCompare(b.file.basename);
+		});
+		this.markedProjects = result;
+	}
+
+	// Merge the dated tasks of a project into contiguous intervals. Overlapping or
+	// day-adjacent tasks are joined; anything with an empty day between stays separate,
+	// so the project bar shows gaps where there are no tasks.
+	private mergeTaskIntervals(tasks: FileTask[]): DateInterval[] {
+		const intervals: DateInterval[] = tasks
+			.filter((t) => t.startDate && t.endDate)
+			.map((t) => ({ start: t.startDate!, end: t.endDate! }))
+			.sort((a, b) => a.start.getTime() - b.start.getTime());
+
+		const merged: DateInterval[] = [];
+		for (const iv of intervals) {
+			const last = merged[merged.length - 1];
+			// Join when the next interval starts on or before the day after `last` ends.
+			if (last && iv.start.getTime() <= addDays(last.end, 1).getTime()) {
+				if (iv.end.getTime() > last.end.getTime()) last.end = iv.end;
+			} else {
+				merged.push({ start: iv.start, end: iv.end });
+			}
+		}
+		return merged;
+	}
+
+	private buildByProjectRows(): void {
+		const rows: DisplayRow[] = [];
+		let ci = 0;
+		for (const proj of this.markedProjects) {
+			const hasDates = proj.start !== null && proj.end !== null;
+			rows.push({
+				type: 'project', projectFile: proj.file, aggregate: true,
+				segments: proj.segments,
+				startDate: proj.start, endDate: proj.end,
+				title: proj.file.basename, colorIndex: ci % TASK_COLORS.length,
+				hasDates, completed: false,
+			});
+			ci++;
+
+			if (this.expanded.has(proj.file.path)) {
+				for (const ft of proj.tasks) {
+					if (this.hideCompleted && ft.completed) continue;
+					const tHasDates = ft.startDate !== null && ft.endDate !== null;
+					rows.push({
+						type: 'task', fileTask: ft,
+						startDate: ft.startDate, endDate: ft.endDate,
+						title: ft.text, colorIndex: ft.colorIndex,
+						hasDates: tHasDates, completed: ft.completed,
+					});
+				}
+				rows.push({
+					type: 'add-task', projectFile: proj.file,
+					startDate: null, endDate: null,
+					title: '', colorIndex: 0, hasDates: false, completed: false,
+				});
+			}
+		}
+		this.displayRows = rows;
+	}
+
+	private computeTimeRange(): void {
+		const today = stripTime(new Date());
+		// The timeline always spans at least the configured windows: a short
+		// history behind today and a longer runway ahead, so you can scroll
+		// forward. Real data outside these windows still extends the range.
+		const historyStart = addMonths(today, -this.plugin.settings.historyMonths);
+		const futureEnd = addMonths(today, this.plugin.settings.futureMonths);
+		let earliest = historyStart;
+		let latest = futureEnd;
+
+		const dated = this.displayRows.filter(r => r.hasDates && r.startDate && r.endDate);
 		for (const t of dated) {
 			if (t.startDate!.getTime() < earliest.getTime()) earliest = t.startDate!;
 			if (t.endDate!.getTime() > latest.getTime()) latest = t.endDate!;
 		}
+
 		this.timelineStart = addDays(earliest, -DATE_PADDING_DAYS);
 		const end = addDays(latest, DATE_PADDING_DAYS);
 		this.totalDays = Math.max(daysBetween(this.timelineStart, end) + 1, 14);
@@ -372,30 +494,39 @@ export class GanttChartView extends ItemView {
 
 	private render(): void {
 		const container = this.contentEl;
+		// Preserve the current scroll position across re-renders (e.g. expand/collapse)
+		// so the timeline doesn't jump back to the start.
+		const prevTimeline = container.querySelector('.gantt-timeline') as HTMLElement | null;
+		const savedScrollLeft = prevTimeline ? prevTimeline.scrollLeft : null;
+		const savedScrollTop = prevTimeline ? prevTimeline.scrollTop : null;
 		container.empty();
 		container.addClass('gantt-container');
 
 		// ── Tabs ─────────────────────────────────────────────────
 		const tabBar = container.createDiv({ cls: 'gantt-tab-bar' });
+		const byProjectTab = tabBar.createEl('button', { cls: 'gantt-tab', text: 'By Project' });
 		const projectsTab = tabBar.createEl('button', { cls: 'gantt-tab', text: 'Projects' });
 		const tasksTab = tabBar.createEl('button', { cls: 'gantt-tab', text: 'Tasks' });
 
 		if (this.activeTab === 'projects') projectsTab.addClass('gantt-tab-active');
-		else tasksTab.addClass('gantt-tab-active');
+		else if (this.activeTab === 'tasks') tasksTab.addClass('gantt-tab-active');
+		else byProjectTab.addClass('gantt-tab-active');
 
-		projectsTab.addEventListener('click', () => {
-			if (this.activeTab === 'projects') return;
-			this.activeTab = 'projects';
+		const switchTab = (tab: 'projects' | 'tasks' | 'byproject') => {
+			if (this.activeTab === tab) return;
+			this.activeTab = tab;
+			this.centerOnToday = true;
 			this.refresh();
-		});
-		tasksTab.addEventListener('click', () => {
-			if (this.activeTab === 'tasks') return;
-			this.activeTab = 'tasks';
-			this.refresh();
-		});
+		};
+		projectsTab.addEventListener('click', () => switchTab('projects'));
+		tasksTab.addEventListener('click', () => switchTab('tasks'));
+		byProjectTab.addEventListener('click', () => switchTab('byproject'));
 
-		// Hide completed toggle
+		// Right-aligned controls: "Today" button + hide-completed toggle
 		const toggleWrap = tabBar.createDiv({ cls: 'gantt-tab-spacer' });
+		const todayBtn = toggleWrap.createEl('button', { cls: 'gantt-today-btn', text: 'Today' });
+		todayBtn.setAttribute('title', 'Scroll the timeline to center on today');
+		todayBtn.addEventListener('click', () => this.centerTimelineOnToday());
 		const hideLabel = toggleWrap.createEl('label', { cls: 'gantt-hide-completed-label' });
 		const checkbox = hideLabel.createEl('input', { type: 'checkbox' });
 		checkbox.type = 'checkbox';
@@ -408,10 +539,19 @@ export class GanttChartView extends ItemView {
 
 		if (this.displayRows.length === 0) {
 			const empty = container.createDiv({ cls: 'gantt-empty' });
-			const msg = this.activeTab === 'projects'
-				? `No files with "${this.plugin.settings.startDateProperty}" or "${this.plugin.settings.endDateProperty}" frontmatter properties were found.`
-				: 'No tasks with dates (\u{1F6EB}/\u{1F4C5}) found in any file.';
-			empty.createEl('h3', { text: this.activeTab === 'projects' ? 'No projects found' : 'No tasks found' });
+			let title: string;
+			let msg: string;
+			if (this.activeTab === 'projects') {
+				title = 'No projects found';
+				msg = `No files with "${this.plugin.settings.startDateProperty}" or "${this.plugin.settings.endDateProperty}" frontmatter properties were found.`;
+			} else if (this.activeTab === 'byproject') {
+				title = 'No projects found';
+				msg = `No files with the "${this.plugin.settings.projectMarkerProperty}: true" frontmatter property were found.`;
+			} else {
+				title = 'No tasks found';
+				msg = 'No tasks with dates (\u{1F6EB}/\u{1F4C5}) found in any file.';
+			}
+			empty.createEl('h3', { text: title });
 			empty.createEl('p', { text: msg });
 			return;
 		}
@@ -424,7 +564,7 @@ export class GanttChartView extends ItemView {
 		const sidebar = wrapper.createDiv({ cls: 'gantt-sidebar' });
 		sidebar.style.width = `${sidebarW}px`;
 		sidebar.style.minWidth = `${sidebarW}px`;
-		const sidebarHeaderText = this.activeTab === 'projects' ? 'Project' : 'Task';
+		const sidebarHeaderText = this.activeTab === 'tasks' ? 'Task' : 'Project';
 		sidebar.createDiv({ cls: 'gantt-sidebar-header', text: sidebarHeaderText });
 		const sidebarBody = sidebar.createDiv({ cls: 'gantt-sidebar-body' });
 
@@ -451,17 +591,16 @@ export class GanttChartView extends ItemView {
 		});
 
 		for (const row of this.displayRows) {
-			if (row.type === 'project' && row.project) {
+			if (row.type === 'project' && (row.project || row.projectFile)) {
+				const projectFile = row.project ? row.project.file : row.projectFile!;
 				const sidebarRow = sidebarBody.createDiv({ cls: 'gantt-sidebar-row gantt-sidebar-row-project' });
-				const isExpanded = this.expanded.has(row.project.file.path);
+				const isExpanded = this.expanded.has(projectFile.path);
 
 				// Chevron
 				const chevron = sidebarRow.createEl('span', { cls: 'gantt-chevron' });
 				chevron.innerHTML = isExpanded
 					? '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"></polyline></svg>'
 					: '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9 18 15 12 9 6"></polyline></svg>';
-
-				const projectFile = row.project.file;
 				chevron.addEventListener('click', (e) => {
 					e.preventDefault(); e.stopPropagation();
 					this.toggleProject(projectFile);
@@ -530,7 +669,7 @@ export class GanttChartView extends ItemView {
 					});
 				});
 			} else if (row.fileTask) {
-				const isNested = this.activeTab === 'projects';
+				const isNested = this.activeTab !== 'tasks';
 				const baseCls = isNested ? 'gantt-sidebar-row gantt-sidebar-row-task' : 'gantt-sidebar-row gantt-sidebar-row-task-flat';
 				let cls = row.hasDates ? baseCls : baseCls + ' gantt-sidebar-row-undated';
 				if (row.completed) cls += ' gantt-sidebar-row-completed';
@@ -573,13 +712,48 @@ export class GanttChartView extends ItemView {
 
 		this.setupScrollSync(timeline, sidebarBody);
 		this.setupZoom(timeline);
+
+		if (this.centerOnToday) {
+			this.centerOnToday = false;
+			const today = stripTime(new Date());
+			const todayX = daysBetween(this.timelineStart, today) * this.dayWidth + this.dayWidth / 2;
+			// Defer until the element is laid out so clientWidth is known.
+			requestAnimationFrame(() => {
+				timeline.scrollLeft = Math.max(0, todayX - timeline.clientWidth / 2);
+			});
+		} else if (savedScrollLeft !== null) {
+			// Keep the timeline where the user left it after a re-render.
+			timeline.scrollLeft = savedScrollLeft;
+			if (savedScrollTop !== null) {
+				timeline.scrollTop = savedScrollTop;
+				sidebarBody.scrollTop = savedScrollTop;
+			}
+		}
 	}
 
 	private renderBars(body: HTMLElement): void {
 		for (let i = 0; i < this.displayRows.length; i++) {
 			const row = this.displayRows[i]!;
 
-			if (row.type === 'project' && row.project && row.startDate && row.endDate) {
+			if (row.type === 'project' && row.aggregate && row.projectFile && row.segments && row.segments.length) {
+				// Rolled-up project bar: derived from its tasks, so it is read-only
+				// (no drag, no date editing — you edit the underlying tasks instead).
+				// Drawn as one segment per task interval, leaving gaps where the
+				// project has no tasks.
+				const projectFile = row.projectFile;
+				const currentRow = row;
+				row.segments.forEach((seg, segIdx) => {
+					// Show the project name only on the first (earliest) segment.
+					const label = segIdx === 0 ? row.title : '';
+					const bar = this.createBar(body, i, seg.start, seg.end, label, row.colorIndex);
+					bar.addClass('gantt-bar-aggregate');
+					bar.addEventListener('click', (e) => { e.stopPropagation(); this.selectBar(currentRow, bar); });
+					bar.addEventListener('dblclick', (e) => {
+						e.preventDefault(); e.stopPropagation();
+						this.app.workspace.getLeaf('tab').openFile(projectFile);
+					});
+				});
+			} else if (row.type === 'project' && row.project && row.startDate && row.endDate) {
 				const task = row.project;
 				const bar = this.createBar(body, i, row.startDate, row.endDate, row.title, row.colorIndex);
 				const currentRow = row;
@@ -609,22 +783,52 @@ export class GanttChartView extends ItemView {
 				});
 				this.attachDrag(bar, (s, e) => updateFileTaskDates(this.app, ft, s, e));
 			} else if (row.type === 'task' && row.fileTask && !row.hasDates) {
-				// Undated task: render a full-width clickable zone
+				// Undated task: render a full-width zone. Click for a single day, or
+				// press and drag to draw a bar spanning as many days as you like.
 				const ft = row.fileTask;
+				const rowIndex = i;
 				const zone = body.createDiv({ cls: 'gantt-undated-zone' });
 				zone.style.top = `${i * ROW_HEIGHT}px`;
 				zone.style.height = `${ROW_HEIGHT}px`;
 				zone.style.width = `${this.totalDays * this.dayWidth}px`;
-				zone.setAttribute('title', 'Double-click to set date for: ' + ft.text);
+				zone.setAttribute('title', 'Click or drag on this row to set a date for: ' + ft.text + '\n(Double-click the task name to edit precisely)');
 
-				zone.addEventListener('dblclick', (e: MouseEvent) => {
+				zone.addEventListener('mousedown', (e: MouseEvent) => {
 					e.preventDefault();
 					e.stopPropagation();
-					const rect = zone.getBoundingClientRect();
-					const x = e.clientX - rect.left;
-					const dayIdx = Math.floor(x / this.dayWidth);
-					const clickedDate = addDays(this.timelineStart, dayIdx);
-					updateFileTaskDates(this.app, ft, clickedDate, clickedDate);
+					const startDayIdx = Math.max(0, Math.floor((e.clientX - zone.getBoundingClientRect().left) / this.dayWidth));
+					let endDayIdx = startDayIdx;
+
+					const color = TASK_COLORS[row.colorIndex] ?? TASK_COLORS[0]!;
+					const temp = body.createDiv({ cls: 'gantt-bar gantt-bar-subtask gantt-bar-dragging' });
+					temp.style.top = `${rowIndex * ROW_HEIGHT + BAR_VERTICAL_OFFSET}px`;
+					temp.style.height = `${BAR_HEIGHT}px`;
+					temp.style.backgroundColor = color.bg;
+					temp.style.borderColor = color.border;
+					const paint = () => {
+						const lo = Math.min(startDayIdx, endDayIdx);
+						const hi = Math.max(startDayIdx, endDayIdx);
+						temp.style.left = `${lo * this.dayWidth}px`;
+						temp.style.width = `${(hi - lo + 1) * this.dayWidth}px`;
+					};
+					paint();
+
+					const onMove = (ev: MouseEvent) => {
+						endDayIdx = Math.max(0, Math.floor((ev.clientX - zone.getBoundingClientRect().left) / this.dayWidth));
+						paint();
+					};
+					const onUp = async (ev: MouseEvent) => {
+						document.removeEventListener('mousemove', onMove);
+						document.removeEventListener('mouseup', onUp);
+						endDayIdx = Math.max(0, Math.floor((ev.clientX - zone.getBoundingClientRect().left) / this.dayWidth));
+						const lo = Math.min(startDayIdx, endDayIdx);
+						const hi = Math.max(startDayIdx, endDayIdx);
+						const s = addDays(this.timelineStart, lo);
+						const e2 = addDays(this.timelineStart, hi);
+						await updateFileTaskDates(this.app, ft, s, e2);
+					};
+					document.addEventListener('mousemove', onMove);
+					document.addEventListener('mouseup', onUp);
 				});
 			}
 		}
@@ -634,6 +838,15 @@ export class GanttChartView extends ItemView {
 
 	private setupScrollSync(timeline: HTMLElement, sidebarBody: HTMLElement): void {
 		timeline.addEventListener('scroll', () => { sidebarBody.scrollTop = timeline.scrollTop; });
+	}
+
+	// Scroll the timeline horizontally so today sits in the middle of the view.
+	private centerTimelineOnToday(): void {
+		const timeline = this.contentEl.querySelector('.gantt-timeline') as HTMLElement | null;
+		if (!timeline) return;
+		const today = stripTime(new Date());
+		const todayX = daysBetween(this.timelineStart, today) * this.dayWidth + this.dayWidth / 2;
+		timeline.scrollLeft = Math.max(0, todayX - timeline.clientWidth / 2);
 	}
 
 	private setupZoom(timeline: HTMLElement): void {

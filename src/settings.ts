@@ -45,6 +45,65 @@ export class GanttSettingTab extends PluginSettingTab {
 					this.plugin.refreshViews();
 				});
 			});
+
+		containerEl.createEl('h3', { text: 'By Project mode' });
+
+		this.addPropertySetting(containerEl, 'Project marker property',
+			'Frontmatter property that marks a note as a project in the "By Project" tab (e.g. "gantt: true"). The project bar is derived from the dates of the tasks inside the note.',
+			this.plugin.settings.projectMarkerProperty, allProperties,
+			async (value: string) => {
+				this.plugin.settings.projectMarkerProperty = value.trim() || 'gantt';
+				await this.plugin.saveSettings();
+				this.plugin.refreshViews();
+			});
+
+		containerEl.createEl('h3', { text: 'Filtering & timeline' });
+
+		new Setting(containerEl)
+			.setName('Excluded folders')
+			.setDesc('Folders to ignore when scanning for projects and tasks (one folder path per line). Applies to all tabs.')
+			.addTextArea((text) => {
+				text.setValue(this.plugin.settings.excludedFolders.join('\n'));
+				text.setPlaceholder('Templates\nArchive/2024');
+				text.inputEl.rows = 4;
+				text.inputEl.addClass('gantt-excluded-folders-input');
+				text.onChange(debounce(async (value: string) => {
+					this.plugin.settings.excludedFolders = value
+						.split('\n')
+						.map((s) => s.trim())
+						.filter((s) => s.length > 0);
+					await this.plugin.saveSettings();
+					this.plugin.refreshViews();
+				}, 500, true));
+			});
+
+		new Setting(containerEl)
+			.setName('History window (months back)')
+			.setDesc('How many months before today the timeline extends. Today is centered when the chart opens.')
+			.addSlider((slider) => {
+				slider.setLimits(1, 24, 1);
+				slider.setValue(this.plugin.settings.historyMonths);
+				slider.setDynamicTooltip();
+				slider.onChange(async (value) => {
+					this.plugin.settings.historyMonths = value;
+					await this.plugin.saveSettings();
+					this.plugin.refreshViews();
+				});
+			});
+
+		new Setting(containerEl)
+			.setName('Future window (months ahead)')
+			.setDesc('How many months after today the timeline extends, so you can scroll and schedule ahead.')
+			.addSlider((slider) => {
+				slider.setLimits(1, 24, 1);
+				slider.setValue(this.plugin.settings.futureMonths);
+				slider.setDynamicTooltip();
+				slider.onChange(async (value) => {
+					this.plugin.settings.futureMonths = value;
+					await this.plugin.saveSettings();
+					this.plugin.refreshViews();
+				});
+			});
 	}
 
 	private addPropertySetting(containerEl: HTMLElement, name: string, desc: string,

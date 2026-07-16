@@ -5,6 +5,10 @@ export interface GanttSettings {
 	endDateProperty: string;
 	hideCompletedTasks: boolean;
 	sidebarWidth: number;
+	projectMarkerProperty: string;
+	excludedFolders: string[];
+	historyMonths: number;
+	futureMonths: number;
 }
 
 export const DEFAULT_SETTINGS: GanttSettings = {
@@ -12,6 +16,10 @@ export const DEFAULT_SETTINGS: GanttSettings = {
 	endDateProperty: 'end_date',
 	hideCompletedTasks: false,
 	sidebarWidth: 220,
+	projectMarkerProperty: 'gantt',
+	excludedFolders: [],
+	historyMonths: 1,
+	futureMonths: 6,
 };
 
 export interface GanttTask {
